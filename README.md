@@ -1,8 +1,8 @@
-## rabbitmq
+# RabbitMQ publish plugin
 
 This plugin allows you to publish messages to RabbitMQ from HSL.
 
-### Params
+## Params
 
 - message_body `string` (**required**)
 - options `array` 
@@ -19,11 +19,11 @@ This plugin allows you to publish messages to RabbitMQ from HSL.
     - tls_verify_peer `boolean` (default `false`)
     - tls_verify_host `boolean` (default `false`)
 
-### Returns
+## Returns
 
 An associative array with a `result` key (if the message was successfully published) or a `error` key (if an error occurred).
 
-### Example with all default options
+## HSL example with all default options
 
 ```
 rabbitmq_publish("hello world", [
