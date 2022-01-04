@@ -1,0 +1,24 @@
+[
+    {
+        "name": "rabbitmq_publish",
+        "parameters": {
+            "required": [
+                {
+                    "name": "message_body",
+                    "type": "string"
+                }
+            ],
+            "optional": [
+                {
+                    "name": "options",
+                    "type": "array"
+                }
+            ]
+        },
+        "returnType": "array",
+        "detail": "rabbitmq_publish(string $message_body, [, array $options]): array",
+        "value": "rabbitmq_publish($0)",
+        "documentation": "Publish a message to RabbitMQ. Returns an associative array with a `result` key (if the message was successfully published) or a `error` key (if an error occurred).",
+        "link": "[Full documentation](https://github.com/halon-extras/rabbitmq)"
+    }
+]

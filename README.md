@@ -2,7 +2,27 @@
 
 This plugin allows you to publish messages to RabbitMQ from HSL.
 
-## Params
+## Installation
+
+Follow the [instructions](https://docs.halon.io/manual/comp_install.html#installation) in our manual to add our package repository and then run the below command.
+
+### Ubuntu
+
+```
+apt-get install halon-extras-rabbitmq
+```
+
+### RHEL
+
+```
+yum install halon-extras-rabbitmq
+```
+
+## Exported functions
+
+### rabbitmq_publish(message_body [, options])
+
+**Params**
 
 - message_body `string` (**required**)
 - options `array` 
@@ -19,11 +39,11 @@ This plugin allows you to publish messages to RabbitMQ from HSL.
     - tls_verify_peer `boolean` (default `false`)
     - tls_verify_host `boolean` (default `false`)
 
-## Returns
+**Returns**
 
 An associative array with a `result` key (if the message was successfully published) or a `error` key (if an error occurred).
 
-## HSL example with all default options
+**Example**
 
 ```
 rabbitmq_publish("hello world", [
