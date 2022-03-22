@@ -1,0 +1,43 @@
+version: "5.8"
+servers:
+  - id: default
+    transport: mx
+transportgroups:
+  - id: default
+    retry:
+      count: 30
+      intervals:
+        - interval: 60
+        - interval: 900
+        - interval: 3600
+          notify: true
+        - interval: 7200
+        - interval: 10800
+    dsn:
+      transport: mx
+    transports:
+      - id: mx
+        session:
+          tls:
+            mode: dane
+resolver:
+  cache:
+    size: 10000
+scripting:
+  files:
+    - id: test.hsl
+      data: |-
+        echo rabbitmq_publish("hello world", [
+            "hostname" => "localhost",
+            "port" => 5672,
+            "connect_timeout" => 10,
+            "vhost" => "/",
+            "username" => "guest",
+            "password" => "guest",
+            "exchange" => "amq.direct",
+            "routing_key" => "",
+            "content_type" => "text/plain",
+            "tls_enabled" => false,
+            "tls_verify_peer" => false,
+            "tls_verify_host" => false
+        ]);
