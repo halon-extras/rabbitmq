@@ -35,6 +35,7 @@ yum install halon-extras-rabbitmq
     - exchange `string` (default `"amq.direct"`)
     - routing_key `string` (default `""`)
     - content_type `string` (default `"text/plain"`)
+    - delivery_mode `string` (default `"nonpersistent"`)
     - tls_enabled `boolean` (default `false`)
     - tls_verify_peer `boolean` (default `false`)
     - tls_verify_host `boolean` (default `false`)
@@ -56,6 +57,7 @@ rabbitmq_publish("hello world", [
     "exchange" => "amq.direct",
     "routing_key" => "",
     "content_type" => "text/plain",
+    "delivery_mode" => "nonpersistent",
     "tls_enabled" => false,
     "tls_verify_peer" => false,
     "tls_verify_host" => false

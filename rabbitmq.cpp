@@ -3,6 +3,7 @@
 #include <amqp.h>
 #include <amqp_tcp_socket.h>
 #include <amqp_ssl_socket.h>
+#include <cstring>
 
 HALON_EXPORT
 int Halon_version()
@@ -30,6 +31,7 @@ void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLVal
     char const *exchange = "amq.direct";
     char const *routing_key = "";
     char const *content_type = "text/plain";
+    amqp_delivery_mode_enum delivery_mode = AMQP_DELIVERY_NONPERSISTENT;
     bool tls_enabled = false;
     bool tls_verify_peer = false;
     bool tls_verify_host = false;
@@ -146,6 +148,25 @@ void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLVal
                 }
             }
 
+            char* _delivery_mode = nullptr;
+            HalonHSLValue *options_delivery_mode = HalonMTA_hsl_value_array_find(options_argument, "delivery_mode");
+            if (options_delivery_mode != NULL) {
+                if (HalonMTA_hsl_value_type(options_delivery_mode) == HALONMTA_HSL_TYPE_STRING) {
+                    HalonMTA_hsl_value_get(options_delivery_mode, HALONMTA_HSL_TYPE_STRING, &_delivery_mode, nullptr);
+                    if (strcmp(_delivery_mode, "persistent") == 0) {
+                        delivery_mode = AMQP_DELIVERY_PERSISTENT;
+                    } else if (strcmp(_delivery_mode, "nonpersistent") == 0) {
+                        delivery_mode = AMQP_DELIVERY_NONPERSISTENT;
+                    } else {
+                        set_ret_error(ret, "unsupported delivery_mode");
+                        return;
+                    }
+                } else {
+                    set_ret_error(ret, "invalid delivery_mode");
+                    return;
+                }
+            }
+
             HalonHSLValue *options_tls_enabled = HalonMTA_hsl_value_array_find(options_argument, "tls_enabled");
             if (options_tls_enabled != NULL) {
                 if (HalonMTA_hsl_value_type(options_tls_enabled) == HALONMTA_HSL_TYPE_BOOLEAN) {
@@ -243,7 +264,7 @@ void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLVal
     amqp_basic_properties_t props;
     props._flags = AMQP_BASIC_CONTENT_TYPE_FLAG | AMQP_BASIC_DELIVERY_MODE_FLAG;
     props.content_type = amqp_cstring_bytes(content_type);
-    props.delivery_mode = AMQP_DELIVERY_NONPERSISTENT; // AMQP_DELIVERY_PERSISTENT
+    props.delivery_mode = delivery_mode;
 
     status = amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, amqp_cstring_bytes(message_body));
     if (status == AMQP_STATUS_OK) {

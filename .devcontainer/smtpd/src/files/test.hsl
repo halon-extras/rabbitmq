@@ -8,6 +8,7 @@ echo rabbitmq_publish("hello world", [
     "exchange" => "amq.direct",
     "routing_key" => "",
     "content_type" => "text/plain",
+    "delivery_mode" => "nonpersistent",
     "tls_enabled" => false,
     "tls_verify_peer" => false,
     "tls_verify_host" => false
