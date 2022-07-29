@@ -4,6 +4,20 @@
 #include <amqp_tcp_socket.h>
 #include <amqp_ssl_socket.h>
 #include <cstring>
+#include <string>
+#include <list>
+#include <mutex>
+
+struct open_conn_t
+{
+    amqp_connection_state_t conn;
+    std::string hostname;
+    int port;
+    std::string vhost;
+};
+
+std::list<open_conn_t> open_conn_list;
+std::mutex lock;
 
 HALON_EXPORT
 int Halon_version()
@@ -17,6 +31,107 @@ void set_ret_error(HalonHSLValue* ret, char const *value)
     HalonMTA_hsl_value_array_add(ret, &error_key, &error_value);
     HalonMTA_hsl_value_set(error_key, HALONMTA_HSL_TYPE_STRING, "error", 0);
     HalonMTA_hsl_value_set(error_value, HALONMTA_HSL_TYPE_STRING, value, 0);
+}
+
+void set_ret_result(HalonHSLValue* ret, char const *value)
+{
+    HalonHSLValue *result_key, *result_value;
+    HalonMTA_hsl_value_array_add(ret, &result_key, &result_value);
+    HalonMTA_hsl_value_set(result_key, HALONMTA_HSL_TYPE_STRING, "result", 0);
+    HalonMTA_hsl_value_set(result_value, HALONMTA_HSL_TYPE_STRING, value, 0);
+}
+
+bool open_connection(
+    amqp_connection_state_t &conn,
+    char const *hostname,
+    int port,
+    int connect_timeout,
+    char const *vhost,
+    char const *username,
+    char const *password,
+    bool tls_enabled,
+    bool tls_verify_peer,
+    bool tls_verify_host,
+    std::string &error
+) {
+    conn = amqp_new_connection();
+    if (!conn) {
+        error = "failed to allocate and initialize connection object";
+        return false;
+    }
+
+    amqp_socket_t *socket;
+    if (tls_enabled) {
+        socket = amqp_ssl_socket_new(conn);
+    } else {
+        socket = amqp_tcp_socket_new(conn);
+    }
+    if (!socket) {
+        error = "failed to create tcp socket";
+        amqp_destroy_connection(conn);
+        return false;
+    }
+
+    if (tls_enabled) {
+        amqp_set_initialize_ssl_library(false);
+        amqp_ssl_socket_set_verify_peer(socket, tls_verify_peer);
+        amqp_ssl_socket_set_verify_hostname(socket, tls_verify_host);
+    }
+
+    struct timeval tval;
+    struct timeval *tv;
+    if (connect_timeout > 0) {
+        tv = &tval;
+        tv->tv_sec = connect_timeout;
+        tv->tv_usec = 0;
+    } else {
+        tv = NULL;
+    }
+
+    int status;
+    amqp_rpc_reply_t reply;
+
+    status = amqp_socket_open_noblock(socket, hostname, port, tv);
+    if (status != AMQP_STATUS_OK) {
+        error = "failed to open socket connection";
+        amqp_destroy_connection(conn);
+        return false;
+    }
+
+    reply = amqp_login(conn, vhost, 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, username, password);
+    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
+        error = "failed to login to the broker";
+        amqp_destroy_connection(conn);
+        return false;
+    }
+
+    amqp_channel_open(conn, 1);
+    reply = amqp_get_rpc_reply(conn);
+    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
+        error = "failed to open channel";
+        amqp_destroy_connection(conn);
+        return false;
+    }
+
+    open_conn_t open_conn;
+    open_conn.conn = conn;
+    open_conn.hostname = hostname;
+    open_conn.port = port;
+    open_conn.vhost = vhost;
+    open_conn_list.push_back(open_conn);
+
+    return true;
+}
+
+void remove_connection(char const *hostname, int port, char const *vhost)
+{
+    for (auto open_conn = open_conn_list.begin(); open_conn != open_conn_list.end(); ) {
+        if (open_conn->hostname == hostname && open_conn->port == port && open_conn->vhost == vhost) {
+            open_conn_list.erase(open_conn++);
+        } else {
+            ++open_conn;
+        }
+    }
 }
 
 void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLValue* ret)
@@ -202,63 +317,28 @@ void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLVal
         }
     }
 
-    amqp_connection_state_t conn = amqp_new_connection();
-    if (!conn) {
-        set_ret_error(ret, "failed to allocate and initialize connection object");
-        return;
-    }
+    std::lock_guard<std::mutex> lg(lock);
 
-    amqp_socket_t *socket;
-    if (tls_enabled) {
-        socket = amqp_ssl_socket_new(conn);
-    } else {
-        socket = amqp_tcp_socket_new(conn);
-    }
-    if (!socket) {
-        set_ret_error(ret, "failed to create tcp socket");
-        amqp_destroy_connection(conn);
-        return;
-    }
+    amqp_connection_state_t conn;
 
-    if (tls_enabled) {
-        amqp_set_initialize_ssl_library(false);
-        amqp_ssl_socket_set_verify_peer(socket, tls_verify_peer);
-        amqp_ssl_socket_set_verify_hostname(socket, tls_verify_host);
+    bool f = false;
+    for (const auto & open_conn : open_conn_list)
+    {
+        if (open_conn.hostname == hostname && open_conn.port == port && open_conn.vhost == vhost)
+        {
+            f = true;
+            conn = open_conn.conn;
+            break;
+        }
     }
-
-    struct timeval tval;
-    struct timeval *tv;
-    if (connect_timeout > 0) {
-        tv = &tval;
-        tv->tv_sec = connect_timeout;
-        tv->tv_usec = 0;
-    } else {
-        tv = NULL;
-    }
-
-    int status;
-    amqp_rpc_reply_t reply;
-
-    status = amqp_socket_open_noblock(socket, hostname, port, tv);
-    if (status != AMQP_STATUS_OK) {
-        set_ret_error(ret, "failed to open socket connection");
-        amqp_destroy_connection(conn);
-        return;
-    }
-    
-    reply = amqp_login(conn, vhost, 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, username, password);
-    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
-        set_ret_error(ret, "failed to login to the broker");
-        amqp_destroy_connection(conn);
-        return;
-    }
-
-    amqp_channel_open(conn, 1);
-    reply = amqp_get_rpc_reply(conn);
-    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
-        set_ret_error(ret, "failed to open channel");
-        amqp_destroy_connection(conn);
-        return;
+    if (!f)
+    {
+        std::string error;
+        auto s = open_connection(conn, hostname, port, connect_timeout, vhost, username, password, tls_enabled, tls_verify_peer, tls_verify_host, error);
+        if (!s) {
+            set_ret_error(ret, error.c_str());
+            return;
+        }
     }
 
     amqp_basic_properties_t props;
@@ -266,21 +346,35 @@ void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLVal
     props.content_type = amqp_cstring_bytes(content_type);
     props.delivery_mode = delivery_mode;
 
+    int status;
     status = amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, amqp_cstring_bytes(message_body));
     if (status == AMQP_STATUS_OK) {
-        HalonHSLValue *result_key, *result_value;
-        HalonMTA_hsl_value_array_add(ret, &result_key, &result_value);
-        HalonMTA_hsl_value_set(result_key, HALONMTA_HSL_TYPE_STRING, "result", 0);
-        HalonMTA_hsl_value_set(result_value, HALONMTA_HSL_TYPE_STRING, "published", 0);
+        set_ret_result(ret, "published");
     } else {
-        set_ret_error(ret, "failed to publish message to broker");
+        remove_connection(hostname, port, vhost);
         amqp_destroy_connection(conn);
-        return;
+        if (f) {
+            amqp_connection_state_t conn_2;
+            std::string error;
+            auto s = open_connection(conn_2, hostname, port, connect_timeout, vhost, username, password, tls_enabled, tls_verify_peer, tls_verify_host, error);
+            if (!s) {
+                set_ret_error(ret, error.c_str());
+                return;
+            }
+            status = amqp_basic_publish(conn_2, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, amqp_cstring_bytes(message_body));
+            if (status == AMQP_STATUS_OK) {
+                set_ret_result(ret, "published");
+            } else {
+                remove_connection(hostname, port, vhost);
+                amqp_destroy_connection(conn_2);
+                set_ret_error(ret, "failed to publish message to broker");
+                return;
+            }
+        } else {
+            set_ret_error(ret, "failed to publish message to broker");
+            return;
+        }
     }
-
-    amqp_channel_close(conn, 1, AMQP_REPLY_SUCCESS);
-    amqp_connection_close(conn, AMQP_REPLY_SUCCESS);
-    amqp_destroy_connection(conn);
 }
 
 HALON_EXPORT
@@ -288,4 +382,17 @@ bool Halon_hsl_register(HalonHSLRegisterContext* hhrc)
 {
     HalonMTA_hsl_register_function(hhrc, "rabbitmq_publish", rabbitmq_publish);
     return true;
+}
+
+HALON_EXPORT
+void Halon_cleanup()
+{
+    std::lock_guard<std::mutex> lg(lock);
+    for (const auto & open_conn : open_conn_list)
+    {
+        amqp_channel_close(open_conn.conn, 1, AMQP_REPLY_SUCCESS);
+        amqp_connection_close(open_conn.conn, AMQP_REPLY_SUCCESS);
+        amqp_destroy_connection(open_conn.conn);
+    }
+    open_conn_list.clear();
 }
