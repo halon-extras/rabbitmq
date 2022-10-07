@@ -47,6 +47,7 @@ An associative array with a `result` key (if the message was successfully publis
 **Example**
 
 ```
+import { rabbitmq_publish } from "extras://rabbitmq";
 rabbitmq_publish("hello world", [
     "hostname" => "localhost",
     "port" => 5672,

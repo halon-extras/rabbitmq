@@ -381,6 +381,7 @@ HALON_EXPORT
 bool Halon_hsl_register(HalonHSLRegisterContext* hhrc)
 {
     HalonMTA_hsl_register_function(hhrc, "rabbitmq_publish", rabbitmq_publish);
+    HalonMTA_hsl_module_register_function(hhrc, "rabbitmq_publish", rabbitmq_publish);
     return true;
 }
 
