@@ -20,6 +20,8 @@ yum install halon-extras-rabbitmq
 
 ## Exported functions
 
+These functions needs to be [imported](https://docs.halon.io/hsl/structures.html#import) from the `extras://rabbitmq` module path.
+
 ### rabbitmq_publish(message_body [, options])
 
 **Params**
