@@ -16,8 +16,8 @@ struct open_conn_t
     std::string vhost;
 };
 
-std::list<open_conn_t> open_conn_list;
-std::mutex lock;
+static std::list<open_conn_t> open_conn_list;
+static std::mutex lock;
 
 HALON_EXPORT
 int Halon_version()
@@ -25,7 +25,7 @@ int Halon_version()
     return HALONMTA_PLUGIN_VERSION;
 }
 
-void set_ret_error(HalonHSLValue* ret, char const *value)
+static void set_ret_error(HalonHSLValue* ret, char const *value)
 {
     HalonHSLValue *error_key, *error_value;
     HalonMTA_hsl_value_array_add(ret, &error_key, &error_value);
@@ -33,7 +33,7 @@ void set_ret_error(HalonHSLValue* ret, char const *value)
     HalonMTA_hsl_value_set(error_value, HALONMTA_HSL_TYPE_STRING, value, 0);
 }
 
-void set_ret_result(HalonHSLValue* ret, char const *value)
+static void set_ret_result(HalonHSLValue* ret, char const *value)
 {
     HalonHSLValue *result_key, *result_value;
     HalonMTA_hsl_value_array_add(ret, &result_key, &result_value);
@@ -41,7 +41,7 @@ void set_ret_result(HalonHSLValue* ret, char const *value)
     HalonMTA_hsl_value_set(result_value, HALONMTA_HSL_TYPE_STRING, value, 0);
 }
 
-bool open_connection(
+static bool open_connection(
     amqp_connection_state_t &conn,
     char const *hostname,
     int port,
@@ -123,7 +123,7 @@ bool open_connection(
     return true;
 }
 
-void remove_connection(char const *hostname, int port, char const *vhost)
+static void remove_connection(char const *hostname, int port, char const *vhost)
 {
     for (auto open_conn = open_conn_list.begin(); open_conn != open_conn_list.end(); ) {
         if (open_conn->hostname == hostname && open_conn->port == port && open_conn->vhost == vhost) {
@@ -134,7 +134,7 @@ void remove_connection(char const *hostname, int port, char const *vhost)
     }
 }
 
-void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLValue* ret)
+static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLValue* ret)
 {
     char const *message_body = "";
     char const *hostname = "localhost";
