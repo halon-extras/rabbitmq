@@ -1,0 +1,26 @@
+Language: Cpp
+BasedOnStyle: Microsoft
+SortIncludes: Never
+UseTab: Always
+IncludeBlocks: Preserve
+AlignEscapedNewlines: DontAlign
+IndentCaseLabels: true
+FixNamespaceComments: false
+BreakBeforeTernaryOperators: false
+BreakConstructorInitializers: BeforeComma 
+EmptyLineBeforeAccessModifier: LogicalBlock
+BreakBeforeBraces: Custom
+BraceWrapping:
+    AfterCaseLabel: true
+    AfterNamespace: false
+AllowShortBlocksOnASingleLine: Empty
+NamespaceIndentation: All
+SeparateDefinitionBlocks: Always
+Cpp11BracedListStyle: false
+CompactNamespaces: true
+DerivePointerAlignment: false
+PointerAlignment: Left
+ColumnLimit: 0
+SpacesInLineCommentPrefix:
+  Minimum: 0
+  Maximum: -1
