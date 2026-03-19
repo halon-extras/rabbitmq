@@ -14,6 +14,11 @@ struct open_conn_t
 	std::string hostname;
 	int port;
 	std::string vhost;
+	std::string username;
+	std::string password;
+	bool tls_enabled;
+	bool tls_verify_peer;
+	bool tls_verify_host;
 };
 
 static std::list<open_conn_t> open_conn_list;
@@ -130,16 +135,35 @@ static bool open_connection(
 	open_conn.hostname = hostname;
 	open_conn.port = port;
 	open_conn.vhost = vhost;
+	open_conn.username = username;
+	open_conn.password = password;
+	open_conn.tls_enabled = tls_enabled;
+	open_conn.tls_verify_peer = tls_verify_peer;
+	open_conn.tls_verify_host = tls_verify_host;
 	open_conn_list.push_back(open_conn);
 
 	return true;
 }
 
-static void remove_connection(char const* hostname, int port, char const* vhost)
+static void remove_connection(char const* hostname,
+							  int port,
+							  char const* vhost,
+							  char const* username,
+							  char const* password,
+							  bool tls_enabled,
+							  bool tls_verify_peer,
+							  bool tls_verify_host)
 {
 	for (auto open_conn = open_conn_list.begin(); open_conn != open_conn_list.end();)
 	{
-		if (open_conn->hostname == hostname && open_conn->port == port && open_conn->vhost == vhost)
+		if (open_conn->hostname == hostname &&
+			open_conn->port == port &&
+			open_conn->vhost == vhost &&
+			open_conn->username == username &&
+			open_conn->password == password &&
+			open_conn->tls_enabled == tls_enabled &&
+			open_conn->tls_verify_peer == tls_verify_peer &&
+			open_conn->tls_verify_host == tls_verify_host)
 		{
 			open_conn_list.erase(open_conn++);
 		}
@@ -407,7 +431,14 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 	bool f = false;
 	for (const auto& open_conn : open_conn_list)
 	{
-		if (open_conn.hostname == hostname && open_conn.port == port && open_conn.vhost == vhost)
+		if (open_conn.hostname == hostname &&
+			open_conn.port == port &&
+			open_conn.vhost == vhost &&
+			open_conn.username == username &&
+			open_conn.password == password &&
+			open_conn.tls_enabled == tls_enabled &&
+			open_conn.tls_verify_peer == tls_verify_peer &&
+			open_conn.tls_verify_host == tls_verify_host)
 		{
 			f = true;
 			conn = open_conn.conn;
@@ -438,7 +469,7 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 	}
 	else
 	{
-		remove_connection(hostname, port, vhost);
+		remove_connection(hostname, port, vhost, username, password, tls_enabled, tls_verify_peer, tls_verify_host);
 		amqp_destroy_connection(conn);
 		if (f)
 		{
@@ -457,7 +488,7 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 			}
 			else
 			{
-				remove_connection(hostname, port, vhost);
+				remove_connection(hostname, port, vhost, username, password, tls_enabled, tls_verify_peer, tls_verify_host);
 				amqp_destroy_connection(conn_2);
 				set_ret_error(ret, "failed to publish message to broker");
 				return;
