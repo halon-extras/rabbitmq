@@ -64,6 +64,37 @@ static void set_ret_result(HalonHSLValue* ret, char const* value)
 	HalonMTA_hsl_value_set(result_value, HALONMTA_HSL_TYPE_STRING, value, 0);
 }
 
+static std::string bytes_to_string(amqp_bytes_t bytes)
+{
+	return std::string((char const*)bytes.bytes, bytes.len);
+}
+
+static std::string rpc_reply_error(const amqp_rpc_reply_t& reply)
+{
+	switch (reply.reply_type)
+	{
+	case AMQP_RESPONSE_NORMAL:
+		return "normal response";
+	case AMQP_RESPONSE_NONE:
+		return "missing rpc reply type";
+	case AMQP_RESPONSE_LIBRARY_EXCEPTION:
+		return amqp_error_string2(reply.library_error);
+	case AMQP_RESPONSE_SERVER_EXCEPTION:
+		if (reply.reply.id == AMQP_CONNECTION_CLOSE_METHOD && reply.reply.decoded)
+		{
+			auto m = (amqp_connection_close_t const*)reply.reply.decoded;
+			return "server connection error " + std::to_string(m->reply_code) + ": " + bytes_to_string(m->reply_text);
+		}
+		if (reply.reply.id == AMQP_CHANNEL_CLOSE_METHOD && reply.reply.decoded)
+		{
+			auto m = (amqp_channel_close_t const*)reply.reply.decoded;
+			return "server channel error " + std::to_string(m->reply_code) + ": " + bytes_to_string(m->reply_text);
+		}
+		return "unknown server error, method id " + std::to_string(reply.reply.id);
+	}
+	return "unknown rpc reply type";
+}
+
 // Opens a connection with channel 1 ready for publishing. Does not touch the
 // connection cache. Returns nullptr and sets error on failure.
 static amqp_connection_state_t open_connection(const conn_key_t& key, int connect_timeout, std::string& error)
@@ -117,7 +148,7 @@ static amqp_connection_state_t open_connection(const conn_key_t& key, int connec
 	status = amqp_socket_open_noblock(socket, key.hostname.c_str(), key.port, tv);
 	if (status != AMQP_STATUS_OK)
 	{
-		error = "failed to open socket connection";
+		error = std::string("failed to open socket connection: ") + amqp_error_string2(status);
 		amqp_destroy_connection(conn);
 		return nullptr;
 	}
@@ -125,7 +156,7 @@ static amqp_connection_state_t open_connection(const conn_key_t& key, int connec
 	reply = amqp_login(conn, key.vhost.c_str(), 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, key.username.c_str(), key.password.c_str());
 	if (reply.reply_type != AMQP_RESPONSE_NORMAL)
 	{
-		error = "failed to login to the broker";
+		error = "failed to login to the broker: " + rpc_reply_error(reply);
 		amqp_destroy_connection(conn);
 		return nullptr;
 	}
@@ -134,7 +165,7 @@ static amqp_connection_state_t open_connection(const conn_key_t& key, int connec
 	reply = amqp_get_rpc_reply(conn);
 	if (reply.reply_type != AMQP_RESPONSE_NORMAL)
 	{
-		error = "failed to open channel";
+		error = "failed to open channel: " + rpc_reply_error(reply);
 		amqp_destroy_connection(conn);
 		return nullptr;
 	}
@@ -405,7 +436,7 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 	body.bytes = (void*)message_body;
 
 	auto publish = [&](amqp_connection_state_t conn) {
-		return amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, body) == AMQP_STATUS_OK;
+		return amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, body);
 	};
 
 	std::lock_guard<std::mutex> lg(lock);
@@ -416,7 +447,7 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 		[&](const open_conn_t& c) { return c.key == key; });
 	if (cached != open_conn_list.end())
 	{
-		if (publish(cached->conn))
+		if (publish(cached->conn) == AMQP_STATUS_OK)
 		{
 			set_ret_result(ret, "published");
 			return;
@@ -433,10 +464,12 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 		return;
 	}
 
-	if (!publish(conn))
+	int status = publish(conn);
+	if (status != AMQP_STATUS_OK)
 	{
 		amqp_destroy_connection(conn);
-		set_ret_error(ret, "failed to publish message to broker");
+		error = std::string("failed to publish message to broker: ") + amqp_error_string2(status);
+		set_ret_error(ret, error.c_str());
 		return;
 	}
 
