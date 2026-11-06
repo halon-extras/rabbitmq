@@ -48,6 +48,15 @@ int Halon_version()
 	return HALONMTA_PLUGIN_VERSION;
 }
 
+HALON_EXPORT
+bool Halon_init(HalonInitContext* hic)
+{
+	// OpenSSL is owned by the host process; stop rabbitmq-c from initializing
+	// it. This only takes effect before the first amqp_ssl_socket_new() call.
+	amqp_set_initialize_ssl_library(false);
+	return true;
+}
+
 static void set_ret_error(HalonHSLValue* ret, char const* value)
 {
 	HalonHSLValue *error_key, *error_value;
@@ -124,7 +133,6 @@ static amqp_connection_state_t open_connection(const conn_key_t& key, int connec
 
 	if (key.tls_enabled)
 	{
-		amqp_set_initialize_ssl_library(false);
 		amqp_ssl_socket_set_verify_peer(socket, key.tls_verify_peer);
 		amqp_ssl_socket_set_verify_hostname(socket, key.tls_verify_host);
 	}
