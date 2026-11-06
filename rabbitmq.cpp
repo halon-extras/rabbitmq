@@ -177,6 +177,7 @@ static void remove_connection(char const* hostname,
 static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLValue* ret)
 {
 	char const* message_body = "";
+	size_t message_body_len = 0;
 	char const* hostname = "localhost";
 	int port = 5672;
 	int connect_timeout = 10;
@@ -197,7 +198,7 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 	{
 		if (HalonMTA_hsl_value_type(message_body_argument) == HALONMTA_HSL_TYPE_STRING)
 		{
-			HalonMTA_hsl_value_get(message_body_argument, HALONMTA_HSL_TYPE_STRING, &message_body, nullptr);
+			HalonMTA_hsl_value_get(message_body_argument, HALONMTA_HSL_TYPE_STRING, &message_body, &message_body_len);
 		}
 		else
 		{
@@ -461,8 +462,12 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 	props.content_type = amqp_cstring_bytes(content_type);
 	props.delivery_mode = delivery_mode;
 
+	amqp_bytes_t body;
+	body.len = message_body_len;
+	body.bytes = (void*)message_body;
+
 	int status;
-	status = amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, amqp_cstring_bytes(message_body));
+	status = amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, body);
 	if (status == AMQP_STATUS_OK)
 	{
 		set_ret_result(ret, "published");
@@ -481,7 +486,7 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 				set_ret_error(ret, error.c_str());
 				return;
 			}
-			status = amqp_basic_publish(conn_2, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, amqp_cstring_bytes(message_body));
+			status = amqp_basic_publish(conn_2, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, body);
 			if (status == AMQP_STATUS_OK)
 			{
 				set_ret_result(ret, "published");
