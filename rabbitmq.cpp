@@ -3,14 +3,14 @@
 #include <amqp.h>
 #include <amqp_tcp_socket.h>
 #include <amqp_ssl_socket.h>
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <list>
 #include <mutex>
 
-struct open_conn_t
+struct conn_key_t
 {
-	amqp_connection_state_t conn;
 	std::string hostname;
 	int port;
 	std::string vhost;
@@ -19,6 +19,24 @@ struct open_conn_t
 	bool tls_enabled;
 	bool tls_verify_peer;
 	bool tls_verify_host;
+
+	bool operator==(const conn_key_t& o) const
+	{
+		return hostname == o.hostname &&
+			port == o.port &&
+			vhost == o.vhost &&
+			username == o.username &&
+			password == o.password &&
+			tls_enabled == o.tls_enabled &&
+			tls_verify_peer == o.tls_verify_peer &&
+			tls_verify_host == o.tls_verify_host;
+	}
+};
+
+struct open_conn_t
+{
+	conn_key_t key;
+	amqp_connection_state_t conn;
 };
 
 static std::list<open_conn_t> open_conn_list;
@@ -46,28 +64,19 @@ static void set_ret_result(HalonHSLValue* ret, char const* value)
 	HalonMTA_hsl_value_set(result_value, HALONMTA_HSL_TYPE_STRING, value, 0);
 }
 
-static bool open_connection(
-	amqp_connection_state_t& conn,
-	char const* hostname,
-	int port,
-	int connect_timeout,
-	char const* vhost,
-	char const* username,
-	char const* password,
-	bool tls_enabled,
-	bool tls_verify_peer,
-	bool tls_verify_host,
-	std::string& error)
+// Opens a connection with channel 1 ready for publishing. Does not touch the
+// connection cache. Returns nullptr and sets error on failure.
+static amqp_connection_state_t open_connection(const conn_key_t& key, int connect_timeout, std::string& error)
 {
-	conn = amqp_new_connection();
+	amqp_connection_state_t conn = amqp_new_connection();
 	if (!conn)
 	{
 		error = "failed to allocate and initialize connection object";
-		return false;
+		return nullptr;
 	}
 
 	amqp_socket_t* socket;
-	if (tls_enabled)
+	if (key.tls_enabled)
 	{
 		socket = amqp_ssl_socket_new(conn);
 	}
@@ -79,14 +88,14 @@ static bool open_connection(
 	{
 		error = "failed to create tcp socket";
 		amqp_destroy_connection(conn);
-		return false;
+		return nullptr;
 	}
 
-	if (tls_enabled)
+	if (key.tls_enabled)
 	{
 		amqp_set_initialize_ssl_library(false);
-		amqp_ssl_socket_set_verify_peer(socket, tls_verify_peer);
-		amqp_ssl_socket_set_verify_hostname(socket, tls_verify_host);
+		amqp_ssl_socket_set_verify_peer(socket, key.tls_verify_peer);
+		amqp_ssl_socket_set_verify_hostname(socket, key.tls_verify_host);
 	}
 
 	struct timeval tval;
@@ -105,20 +114,20 @@ static bool open_connection(
 	int status;
 	amqp_rpc_reply_t reply;
 
-	status = amqp_socket_open_noblock(socket, hostname, port, tv);
+	status = amqp_socket_open_noblock(socket, key.hostname.c_str(), key.port, tv);
 	if (status != AMQP_STATUS_OK)
 	{
 		error = "failed to open socket connection";
 		amqp_destroy_connection(conn);
-		return false;
+		return nullptr;
 	}
 
-	reply = amqp_login(conn, vhost, 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, username, password);
+	reply = amqp_login(conn, key.vhost.c_str(), 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, key.username.c_str(), key.password.c_str());
 	if (reply.reply_type != AMQP_RESPONSE_NORMAL)
 	{
 		error = "failed to login to the broker";
 		amqp_destroy_connection(conn);
-		return false;
+		return nullptr;
 	}
 
 	amqp_channel_open(conn, 1);
@@ -127,51 +136,10 @@ static bool open_connection(
 	{
 		error = "failed to open channel";
 		amqp_destroy_connection(conn);
-		return false;
+		return nullptr;
 	}
 
-	open_conn_t open_conn;
-	open_conn.conn = conn;
-	open_conn.hostname = hostname;
-	open_conn.port = port;
-	open_conn.vhost = vhost;
-	open_conn.username = username;
-	open_conn.password = password;
-	open_conn.tls_enabled = tls_enabled;
-	open_conn.tls_verify_peer = tls_verify_peer;
-	open_conn.tls_verify_host = tls_verify_host;
-	open_conn_list.push_back(open_conn);
-
-	return true;
-}
-
-static void remove_connection(char const* hostname,
-							  int port,
-							  char const* vhost,
-							  char const* username,
-							  char const* password,
-							  bool tls_enabled,
-							  bool tls_verify_peer,
-							  bool tls_verify_host)
-{
-	for (auto open_conn = open_conn_list.begin(); open_conn != open_conn_list.end();)
-	{
-		if (open_conn->hostname == hostname &&
-			open_conn->port == port &&
-			open_conn->vhost == vhost &&
-			open_conn->username == username &&
-			open_conn->password == password &&
-			open_conn->tls_enabled == tls_enabled &&
-			open_conn->tls_verify_peer == tls_verify_peer &&
-			open_conn->tls_verify_host == tls_verify_host)
-		{
-			open_conn_list.erase(open_conn++);
-		}
-		else
-		{
-			++open_conn;
-		}
-	}
+	return conn;
 }
 
 static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, HalonHSLValue* ret)
@@ -425,37 +393,7 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 		}
 	}
 
-	std::lock_guard<std::mutex> lg(lock);
-
-	amqp_connection_state_t conn;
-
-	bool f = false;
-	for (const auto& open_conn : open_conn_list)
-	{
-		if (open_conn.hostname == hostname &&
-			open_conn.port == port &&
-			open_conn.vhost == vhost &&
-			open_conn.username == username &&
-			open_conn.password == password &&
-			open_conn.tls_enabled == tls_enabled &&
-			open_conn.tls_verify_peer == tls_verify_peer &&
-			open_conn.tls_verify_host == tls_verify_host)
-		{
-			f = true;
-			conn = open_conn.conn;
-			break;
-		}
-	}
-	if (!f)
-	{
-		std::string error;
-		auto s = open_connection(conn, hostname, port, connect_timeout, vhost, username, password, tls_enabled, tls_verify_peer, tls_verify_host, error);
-		if (!s)
-		{
-			set_ret_error(ret, error.c_str());
-			return;
-		}
-	}
+	conn_key_t key{hostname, port, vhost, username, password, tls_enabled, tls_verify_peer, tls_verify_host};
 
 	amqp_basic_properties_t props;
 	props._flags = AMQP_BASIC_CONTENT_TYPE_FLAG | AMQP_BASIC_DELIVERY_MODE_FLAG;
@@ -466,45 +404,44 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 	body.len = message_body_len;
 	body.bytes = (void*)message_body;
 
-	int status;
-	status = amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, body);
-	if (status == AMQP_STATUS_OK)
+	auto publish = [&](amqp_connection_state_t conn) {
+		return amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, body) == AMQP_STATUS_OK;
+	};
+
+	std::lock_guard<std::mutex> lg(lock);
+
+	// Try the cached connection first; if publishing on it fails, drop it and
+	// fall through to a fresh connection
+	auto cached = std::find_if(open_conn_list.begin(), open_conn_list.end(),
+		[&](const open_conn_t& c) { return c.key == key; });
+	if (cached != open_conn_list.end())
 	{
-		set_ret_result(ret, "published");
-	}
-	else
-	{
-		remove_connection(hostname, port, vhost, username, password, tls_enabled, tls_verify_peer, tls_verify_host);
-		amqp_destroy_connection(conn);
-		if (f)
+		if (publish(cached->conn))
 		{
-			amqp_connection_state_t conn_2;
-			std::string error;
-			auto s = open_connection(conn_2, hostname, port, connect_timeout, vhost, username, password, tls_enabled, tls_verify_peer, tls_verify_host, error);
-			if (!s)
-			{
-				set_ret_error(ret, error.c_str());
-				return;
-			}
-			status = amqp_basic_publish(conn_2, 1, amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key), 0, 0, &props, body);
-			if (status == AMQP_STATUS_OK)
-			{
-				set_ret_result(ret, "published");
-			}
-			else
-			{
-				remove_connection(hostname, port, vhost, username, password, tls_enabled, tls_verify_peer, tls_verify_host);
-				amqp_destroy_connection(conn_2);
-				set_ret_error(ret, "failed to publish message to broker");
-				return;
-			}
-		}
-		else
-		{
-			set_ret_error(ret, "failed to publish message to broker");
+			set_ret_result(ret, "published");
 			return;
 		}
+		amqp_destroy_connection(cached->conn);
+		open_conn_list.erase(cached);
 	}
+
+	std::string error;
+	amqp_connection_state_t conn = open_connection(key, connect_timeout, error);
+	if (!conn)
+	{
+		set_ret_error(ret, error.c_str());
+		return;
+	}
+
+	if (!publish(conn))
+	{
+		amqp_destroy_connection(conn);
+		set_ret_error(ret, "failed to publish message to broker");
+		return;
+	}
+
+	open_conn_list.push_back({key, conn});
+	set_ret_result(ret, "published");
 }
 
 HALON_EXPORT
