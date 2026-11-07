@@ -73,11 +73,6 @@ static void set_ret_result(HalonHSLValue* ret, char const* value)
 	HalonMTA_hsl_value_set(result_value, HALONMTA_HSL_TYPE_STRING, value, 0);
 }
 
-static std::string bytes_to_string(amqp_bytes_t bytes)
-{
-	return std::string((char const*)bytes.bytes, bytes.len);
-}
-
 static std::string rpc_reply_error(const amqp_rpc_reply_t& reply)
 {
 	switch (reply.reply_type)
@@ -92,12 +87,12 @@ static std::string rpc_reply_error(const amqp_rpc_reply_t& reply)
 		if (reply.reply.id == AMQP_CONNECTION_CLOSE_METHOD && reply.reply.decoded)
 		{
 			auto m = (amqp_connection_close_t const*)reply.reply.decoded;
-			return "server connection error " + std::to_string(m->reply_code) + ": " + bytes_to_string(m->reply_text);
+			return "server connection error " + std::to_string(m->reply_code) + ": " + std::string((char const*)m->reply_text.bytes, m->reply_text.len);
 		}
 		if (reply.reply.id == AMQP_CHANNEL_CLOSE_METHOD && reply.reply.decoded)
 		{
 			auto m = (amqp_channel_close_t const*)reply.reply.decoded;
-			return "server channel error " + std::to_string(m->reply_code) + ": " + bytes_to_string(m->reply_text);
+			return "server channel error " + std::to_string(m->reply_code) + ": " + std::string((char const*)m->reply_text.bytes, m->reply_text.len);
 		}
 		return "unknown server error, method id " + std::to_string(reply.reply.id);
 	}
