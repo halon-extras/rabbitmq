@@ -101,7 +101,7 @@ static std::string rpc_reply_error(const amqp_rpc_reply_t& reply)
 
 // Opens a connection with channel 1 ready for publishing. Does not touch the
 // connection cache. Returns nullptr and sets error on failure.
-static amqp_connection_state_t open_connection(const conn_key_t& key, int connect_timeout, std::string& error)
+static amqp_connection_state_t open_connection(const conn_key_t& key, double connect_timeout, std::string& error)
 {
 	amqp_connection_state_t conn = amqp_new_connection();
 	if (!conn)
@@ -137,8 +137,8 @@ static amqp_connection_state_t open_connection(const conn_key_t& key, int connec
 	if (connect_timeout > 0)
 	{
 		tv = &tval;
-		tv->tv_sec = connect_timeout;
-		tv->tv_usec = 0;
+		tv->tv_sec = (time_t)connect_timeout;
+		tv->tv_usec = (suseconds_t)((connect_timeout - (double)tv->tv_sec) * 1000000);
 	}
 	else
 	{
@@ -182,7 +182,7 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 	size_t message_body_len = 0;
 	char const* hostname = "localhost";
 	int port = 5672;
-	int connect_timeout = 10;
+	double connect_timeout = 10;
 	char const* vhost = "/";
 	char const* username = "guest";
 	char const* password = "guest";
@@ -253,11 +253,9 @@ static void rabbitmq_publish(HalonHSLContext* hhc, HalonHSLArguments* args, Halo
 			HalonHSLValue* options_connect_timeout = HalonMTA_hsl_value_array_find(options_argument, "connect_timeout");
 			if (options_connect_timeout != NULL)
 			{
-				double options_connect_timeout_double;
 				if (HalonMTA_hsl_value_type(options_connect_timeout) == HALONMTA_HSL_TYPE_NUMBER)
 				{
-					HalonMTA_hsl_value_get(options_connect_timeout, HALONMTA_HSL_TYPE_NUMBER, &options_connect_timeout_double, nullptr);
-					connect_timeout = (int)options_connect_timeout_double;
+					HalonMTA_hsl_value_get(options_connect_timeout, HALONMTA_HSL_TYPE_NUMBER, &connect_timeout, nullptr);
 				}
 				else
 				{
